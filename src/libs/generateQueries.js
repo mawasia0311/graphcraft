@@ -13,6 +13,7 @@ const {
   simplifyAST
 } = require('graphql-sequelize');
 const { sanitizeField, generateName, isAvailable, whereQueryVarsToValues } = require('../utils');
+const hooks = require('../resolvers/hooks');
 
 const filterPermissions = (rules, modelName) => {
 
@@ -127,13 +128,19 @@ module.exports = (options) => {
           args: {
             where: defaultListArgs().where
           },
-          resolve: (source, { where }, context, info) => {
+          resolve: async (source, { where }, context, info) => {
 
             if (!isAvailable(exposeOnly.queries, [modelCountQueryName]) && exposeOnly.throw) {
               throw Error(exposeOnly.throw);
             }
 
-            const args = argsToFindOptions.default({ where });
+            // Same checks as the list query: authorizer, then the model's before.fetch hook
+            // (e.g. club scoping), so counts are never open or wider than their lists.
+            const hookArgs = { where };
+            await options.authorizer(source, hookArgs, context, info);
+            await hooks.before(models[modelTypeName], source, hookArgs, context, info, 'fetch');
+
+            const args = argsToFindOptions.default({ where: hookArgs.where });
 
             if (args.where) whereQueryVarsToValues(args.where, info.variableValues);
 
